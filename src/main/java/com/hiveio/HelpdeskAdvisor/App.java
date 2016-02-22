@@ -7,11 +7,18 @@ import javax.jms.Destination;
 import javax.jms.ExceptionListener;
 import javax.jms.JMSException;
 import javax.jms.Message;
+import javax.jms.ObjectMessage;
+import javax.jms.MapMessage;
 import javax.jms.MessageProducer;
+import javax.jms.MessageConsumer;
 import javax.jms.Session;
 import javax.jms.TextMessage;
 import javax.naming.Context;
 import javax.naming.InitialContext;
+
+import java.util.Map;
+import java.util.Enumeration;
+import java.util.concurrent.Future;
 
 public class App
 {
@@ -20,46 +27,48 @@ public class App
     private static final int DEFAULT_COUNT = 10;
     private static final int DELIVERY_MODE = DeliveryMode.NON_PERSISTENT;
 
+    public static void printMapMessage(ObjectMessage msg) throws Exception {
+      Map<String, ?> message = (Map<String, ?>)msg.getObject();
+      for (Map.Entry<String, ?> entry : message.entrySet()) {
+        System.out.println(entry.getKey() + "=" + entry.getValue());
+      }
+    }
+
     public static void main(String[] args) throws Exception {
-        int count = DEFAULT_COUNT;
+        String guestName;
         if (args.length == 0) {
-            System.out.println("Sending up to " + count + " messages.");
-            System.out.println("Specify a message count as the program argument if you wish to send a different amount.");
+            guestName = "W770008";
         } else {
-            count = Integer.parseInt(args[0]);
-            System.out.println("Sending up to " + count + " messages.");
+            guestName = args[0];
         }
 
         try {
-            // The configuration for the Qpid InitialContextFactory has been supplied in
-            // a jndi.properties file in the classpath, which results in it being picked
-            // up automatically by the InitialContext constructor.
             Context context = new InitialContext();
-
             ConnectionFactory factory = (ConnectionFactory) context.lookup("myFactoryLookup");
-            Destination queue = (Destination) context.lookup("myTopicLookup");
+            Destination guestActionRequestTopic = (Destination) context.lookup("guestActionRequest");
+            Destination guestActionResponseTopic = (Destination) context.lookup("guestActionResponse");
 
             Connection connection = factory.createConnection(USER, PASSWORD);
             connection.setExceptionListener(new MyExceptionListener());
             connection.start();
 
             Session session = connection.createSession(false, Session.AUTO_ACKNOWLEDGE);
+            MessageProducer messageProducer = session.createProducer(guestActionRequestTopic);
+            MessageConsumer messageConsumer = session.createConsumer(guestActionResponseTopic);
 
-            MessageProducer messageProducer = session.createProducer(queue);
+            System.out.println("Sending message command to: " + guestName);
+            Guest testGuest = new Guest(guestName, session, messageProducer, messageConsumer);
 
-            long start = System.currentTimeMillis();
-            for (int i = 1; i <= count; i++) {
-                TextMessage message = session.createTextMessage("Text!");
-                messageProducer.send(message, DELIVERY_MODE, Message.DEFAULT_PRIORITY, Message.DEFAULT_TIME_TO_LIVE);
+            // sending a message
+            // testGuest.sendMessage("some title", "some message");
 
-                if (i % 100 == 0) {
-                    System.out.println("Sent message " + i);
-                }
+            // getting application logs
+            Future<Map> logs = testGuest.getApplicationLogs();
+            while (!logs.isDone()) {
+              // simulate some waiting and other processing
+              Thread.sleep(1); // adding delay for example
             }
-
-            long finish = System.currentTimeMillis();
-            long taken = finish - start;
-            System.out.println("Sent " + count + " messages in " + taken + "ms");
+            System.out.println("received a response: " + logs.get());
 
             connection.close();
         } catch (Exception exp) {
